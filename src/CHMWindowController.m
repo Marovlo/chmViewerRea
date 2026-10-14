@@ -10,8 +10,9 @@ static NSString * const kToolbarID = @"CHMReMainToolbar";
                                    NSOutlineViewDelegate, WKNavigationDelegate>
 @property (nonatomic, strong, readwrite) CHMDocument *chmDoc;
 @property (nonatomic, strong) NSSplitView *splitView;
-@property (nonatomic, strong) NSLayoutConstraint *leftWidthConstraint;
+@property (nonatomic, strong) NSSearchField *searchField;
 @property (nonatomic, strong) NSOutlineView *outlineView;
+@property (nonatomic, copy) NSArray<CHMTopicNode *> *searchResults;
 @property (nonatomic, strong) WKWebView *webView;
 @property (nonatomic, strong) ItssSchemeHandler *schemeHandler;
 @property (nonatomic, strong) NSURL *currentURL;
@@ -65,26 +66,52 @@ static NSArray<NSArray *> *EncodingMenu() {
     _splitView.autoresizesSubviews = YES;
     _splitView.translatesAutoresizingMaskIntoConstraints = NO;
 
-    // Left pane — TOC outline.
-    _outlineView = [[NSOutlineView alloc] initWithFrame:NSMakeRect(0, 0, 210, 560)];
+    // Left pane — search field + TOC outline, stacked vertically.
+    NSView *leftPane = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 210, 560)];
+
+    _outlineView = [[NSOutlineView alloc] initWithFrame:NSMakeRect(0, 0, 210, 530)];
     NSTableColumn *col = [[NSTableColumn alloc] initWithIdentifier:@"topic"];
     col.title = @"Topics";
-    col.resizingMask = NSTableColumnAutoresizingMask;
+    col.resizingMask = NSTableColumnAutoresizingMask | NSTableColumnUserResizingMask;
+    col.width = 210;
     [_outlineView addTableColumn:col];
     _outlineView.outlineTableColumn = col;
     _outlineView.headerView = nil;
-    _outlineView.autoresizesOutlineColumn = NO;
+    _outlineView.autoresizesOutlineColumn = YES;
     _outlineView.indentationPerLevel = 14;
     _outlineView.rowHeight = 22;   // keeps disclosure triangle vertically centered with text
+    _outlineView.columnAutoresizingStyle = NSTableViewUniformColumnAutoresizingStyle;
     _outlineView.selectionHighlightStyle = NSTableViewSelectionHighlightStyleRegular;
     _outlineView.allowsEmptySelection = YES;
     _outlineView.focusRingType = NSFocusRingTypeNone;
     _outlineView.dataSource = self;
     _outlineView.delegate = self;
-    NSScrollView *leftScroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 210, 560)];
+    NSScrollView *leftScroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 210, 526)];
     leftScroll.hasVerticalScroller = YES;
     leftScroll.documentView = _outlineView;
     leftScroll.translatesAutoresizingMaskIntoConstraints = NO;
+
+    _searchField = [[NSSearchField alloc] initWithFrame:NSMakeRect(0, 0, 194, 26)];
+    _searchField.translatesAutoresizingMaskIntoConstraints = NO;
+    _searchField.placeholderString = @"搜索目录";
+    _searchField.sendsWholeSearchString = NO;
+    _searchField.sendsSearchStringImmediately = YES;
+    _searchField.target = self;
+    _searchField.action = @selector(searchChanged:);
+    _searchField.font = [NSFont systemFontOfSize:12];
+
+    [leftPane addSubview:_searchField];
+    [leftPane addSubview:leftScroll];
+    [NSLayoutConstraint activateConstraints:@[
+        [_searchField.topAnchor constraintEqualToAnchor:leftPane.topAnchor constant:8],
+        [_searchField.leadingAnchor constraintEqualToAnchor:leftPane.leadingAnchor constant:8],
+        [_searchField.trailingAnchor constraintEqualToAnchor:leftPane.trailingAnchor constant:-8],
+        [_searchField.heightAnchor constraintEqualToConstant:26],
+        [leftScroll.topAnchor constraintEqualToAnchor:_searchField.bottomAnchor constant:6],
+        [leftScroll.leadingAnchor constraintEqualToAnchor:leftPane.leadingAnchor],
+        [leftScroll.trailingAnchor constraintEqualToAnchor:leftPane.trailingAnchor],
+        [leftScroll.bottomAnchor constraintEqualToAnchor:leftPane.bottomAnchor],
+    ]];
 
     // Right pane — content web view with the itss:// scheme handler attached.
     WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
@@ -94,18 +121,14 @@ static NSArray<NSArray *> *EncodingMenu() {
     [config setURLSchemeHandler:_schemeHandler forURLScheme:@"itss"];
     _webView = [[WKWebView alloc] initWithFrame:NSMakeRect(0, 0, 700, 560) configuration:config];
     _webView.navigationDelegate = self;
-    _webView.translatesAutoresizingMaskIntoConstraints = NO;
 
-    [_splitView addArrangedSubview:leftScroll];
+    [_splitView addArrangedSubview:leftPane];
     [_splitView addArrangedSubview:_webView];
 
-    // Sidebar width driven by a constraint at holding priority, so the divider
-    // stays draggable while the pane keeps its width on window resize.
-    _leftWidthConstraint = [leftScroll.widthAnchor constraintEqualToConstant:210];
-    _leftWidthConstraint.priority = 260;   // == holding priority below
-    _leftWidthConstraint.active = YES;
-    [_splitView setHoldingPriority:260 forSubviewAtIndex:0];
-    [_splitView setHoldingPriority:249 forSubviewAtIndex:1];
+    // Frame-based panes: holding priority keeps the sidebar width on window
+    // resize; the divider stays freely draggable.
+    [_splitView setHoldingPriority:261 forSubviewAtIndex:0];
+    [_splitView setHoldingPriority:250 forSubviewAtIndex:1];
 
     NSView *content = win.contentView;
     [content addSubview:_splitView];
@@ -130,13 +153,19 @@ static NSArray<NSArray *> *EncodingMenu() {
 
     [win makeFirstResponder:_outlineView];
 
+    // Apply the divider position after the first layout pass.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [_splitView setPosition:210 ofDividerAtIndex:0];
+        [_outlineView sizeLastColumnToFit];
+    });
+
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        NSLog(@"[CHMRe] layout: window=%@ left=%@ web=%@ splitDiv=%@",
+        NSLog(@"[CHMRe] layout: window=%@ pane=%@ scroll=%@ web=%@",
               NSStringFromRect(win.frame),
+              NSStringFromRect(leftPane.frame),
               NSStringFromRect(leftScroll.frame),
-              NSStringFromRect(_webView.frame),
-              @(_splitView.dividerThickness));
+              NSStringFromRect(_webView.frame));
     });
     return self;
 }
@@ -158,16 +187,15 @@ static NSArray<NSArray *> *EncodingMenu() {
 - (IBAction)goForward:(id)sender { [_webView goForward]; }
 
 - (IBAction)toggleSidebar:(id)sender {
-    BOOL hidden = _leftWidthConstraint.constant == 0;
-    _leftWidthConstraint.constant = hidden ? 210 : 0;
+    NSView *leftPane = _splitView.arrangedSubviews.firstObject;
+    BOOL hiding = leftPane.frame.size.width > 1;
+    [_splitView setPosition:hiding ? 0 : 210 ofDividerAtIndex:0];
+    [_outlineView sizeLastColumnToFit];
 }
 
 - (void)splitViewDidResizeSubviews:(NSNotification *)notification {
-    // Keep the width constraint in sync so user divider drags persist.
-    NSView *leftPane = _splitView.arrangedSubviews.firstObject;
-    CGFloat w = leftPane.frame.size.width;
-    if (w > 1 && ABS(w - _leftWidthConstraint.constant) > 0.5)
-        _leftWidthConstraint.constant = w;
+    // Stretch the single TOC column so text is never clipped.
+    [_outlineView sizeLastColumnToFit];
 }
 
 - (void)encodingChanged:(NSPopUpButton *)sender {
@@ -234,21 +262,57 @@ static NSArray<NSArray *> *EncodingMenu() {
     return nil;
 }
 
+#pragma mark Search
+
+- (BOOL)isSearching {
+    return _searchField.stringValue.length > 0;
+}
+
+- (IBAction)searchChanged:(NSSearchField *)sender {
+    NSString *q = sender.stringValue;
+    if (q.length == 0) {
+        _searchResults = nil;
+        [_outlineView reloadData];
+        for (CHMTopicNode *top in self.chmDoc.tocRoot.children)
+            [_outlineView expandItem:top];
+        [_outlineView sizeLastColumnToFit];
+        return;
+    }
+    NSMutableArray<CHMTopicNode *> *hits = [NSMutableArray array];
+    NSMutableArray<CHMTopicNode *> *stack =
+        [self.chmDoc.tocRoot.children mutableCopy];
+    while (stack.count) {
+        CHMTopicNode *n = stack.lastObject;
+        [stack removeLastObject];
+        if ([n.title localizedCaseInsensitiveContainsString:q] ||
+            [n.path localizedCaseInsensitiveContainsString:q])
+            [hits addObject:n];
+        [stack addObjectsFromArray:n.children];
+    }
+    _searchResults = hits;
+    [_outlineView reloadData];
+    [_outlineView sizeLastColumnToFit];
+    NSLog(@"[CHMRe] search '%@': %lu hits", q, (unsigned long)hits.count);
+}
+
 #pragma mark NSOutlineViewDataSource / Delegate
 
 - (NSInteger)outlineView:(NSOutlineView *)outlineView numberOfChildrenOfItem:(id)item {
+    if (self.isSearching) return item == nil ? _searchResults.count : 0;
     CHMTopicNode *root = self.chmDoc.tocRoot;
     NSArray *kids = item ? ((CHMTopicNode *)item).children : root.children;
     return kids.count;
 }
 
 - (id)outlineView:(NSOutlineView *)outlineView child:(NSInteger)index ofItem:(id)item {
+    if (self.isSearching) return item == nil ? _searchResults[index] : nil;
     CHMTopicNode *root = self.chmDoc.tocRoot;
     NSArray *kids = item ? ((CHMTopicNode *)item).children : root.children;
     return kids.count > index ? kids[index] : nil;
 }
 
 - (BOOL)outlineView:(NSOutlineView *)outlineView isItemExpandable:(id)item {
+    if (self.isSearching) return NO;
     return [self outlineView:outlineView numberOfChildrenOfItem:item] > 0;
 }
 

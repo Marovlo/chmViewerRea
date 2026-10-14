@@ -18,6 +18,8 @@ CHM 文件 → chmlib 解析 (ITSF/ITSP + LZX) → itss:// 自定义协议 → W
 - `ABCHMContent initWithData:encodingName:`（libxml2 解析 hhc/hhk）→ 同名类，同依赖
 - NSDocument 式文档模型 / `readFromFile:` 打开即 loadMetadata + setupTOCSource → CHMDocument
 - 左侧 TOC 大纲 + 右侧 WebView + 右上角文本编码下拉 → CHMWindowController
+- 侧栏顶部目录搜索框（实时过滤 9000+ 节点，平铺结果列表）
+- 原版 chmlib 的 UTF-16 目录名 / PMGI collation 两处缺陷已修复（见下）
 
 ## 对原版 chmlib 的三处必要修复（逆向发现）
 

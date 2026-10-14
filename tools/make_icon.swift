@@ -24,16 +24,17 @@ func render(_ size: CGFloat) -> NSBitmapImageRep {
     ])!
     gradient.draw(in: path, angle: -90)
 
-    // white "?" centered, slight optical lift
+    // white "CHM" centered, slight optical lift
     let para = NSMutableParagraphStyle()
     para.alignment = .center
     let attrs: [NSAttributedString.Key: Any] = [
-        .font: NSFont.systemFont(ofSize: size * 0.60, weight: .bold),
+        .font: NSFont.systemFont(ofSize: size * 0.28, weight: .bold),
         .foregroundColor: NSColor.white,
-        .paragraphStyle: para
+        .paragraphStyle: para,
+        .kern: size * 0.015
     ]
-    NSAttributedString(string: "?", attributes: attrs)
-        .draw(in: NSRect(x: 0, y: size * 0.06, width: size, height: size * 0.92))
+    NSAttributedString(string: "CHM", attributes: attrs)
+        .draw(in: NSRect(x: 0, y: size * 0.36, width: size, height: size * 0.3))
 
     NSGraphicsContext.restoreGraphicsState()
     return rep
