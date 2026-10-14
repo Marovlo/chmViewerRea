@@ -14,6 +14,8 @@ static NSString * const kToolbarID = @"CHMReMainToolbar";
 @property (nonatomic, strong) NSOutlineView *outlineView;
 @property (nonatomic, copy) NSArray<CHMTopicNode *> *searchResults;
 @property (nonatomic, assign) BOOL syncingSelection;
+@property (nonatomic, assign) BOOL searchWidened;      // sidebar widened for search
+@property (nonatomic, assign) CGFloat preSearchWidth;
 @property (nonatomic, strong) WKWebView *webView;
 @property (nonatomic, strong) ItssSchemeHandler *schemeHandler;
 @property (nonatomic, strong) NSURL *currentURL;
@@ -87,6 +89,8 @@ static NSArray<NSArray *> *EncodingMenu() {
     _outlineView.focusRingType = NSFocusRingTypeNone;
     _outlineView.dataSource = self;
     _outlineView.delegate = self;
+    _outlineView.target = self;
+    _outlineView.doubleAction = @selector(resultDoubleClicked:);
     NSScrollView *leftScroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 210, 526)];
     leftScroll.hasVerticalScroller = YES;
     leftScroll.documentView = _outlineView;
@@ -264,6 +268,21 @@ static NSArray<NSArray *> *EncodingMenu() {
     return nil;
 }
 
+// Double-click a search result: exit search, restore the sidebar, and land on
+// that entry in the tree (the right side already previews it from the 1st click).
+- (void)resultDoubleClicked:(id)sender {
+    if (!self.isSearching) return;
+    NSInteger row = [_outlineView clickedRow];
+    if (row < 0) return;
+    CHMTopicNode *node = [_outlineView itemAtRow:row];
+    if (!node.path.length) return;
+
+    [self navigateTo:[self.chmDoc URLForCHMPath:node.path]];
+    _searchField.stringValue = @"";
+    [self searchChanged:_searchField];        // restores tree + width
+    [self syncOutlineSelectionToPagePath:node.path];
+}
+
 #pragma mark Search
 
 // CHMRE_TEST=1: programmatic verification of search + selection sync.
@@ -292,15 +311,23 @@ static NSArray<NSArray *> *EncodingMenu() {
     return _searchField.stringValue.length > 0;
 }
 
+- (void)exitSearch {
+    if (_searchWidened) {
+        _searchWidened = NO;
+        [_splitView setPosition:_preSearchWidth ofDividerAtIndex:0];
+    }
+    _searchResults = nil;
+    _outlineView.rowHeight = 22;
+    [_outlineView reloadData];
+    for (CHMTopicNode *top in self.chmDoc.tocRoot.children)
+        [_outlineView expandItem:top];
+    [_outlineView sizeLastColumnToFit];
+}
+
 - (IBAction)searchChanged:(NSSearchField *)sender {
     NSString *q = sender.stringValue;
     if (q.length == 0) {
-        _searchResults = nil;
-        _outlineView.rowHeight = 22;
-        [_outlineView reloadData];
-        for (CHMTopicNode *top in self.chmDoc.tocRoot.children)
-            [_outlineView expandItem:top];
-        [_outlineView sizeLastColumnToFit];
+        [self exitSearch];
         // Back from search: the tree follows whatever page the right side shows.
         NSString *pagePath = _webView.URL.path;
         if (pagePath.length > 1) {
@@ -309,6 +336,12 @@ static NSArray<NSArray *> *EncodingMenu() {
             [self syncOutlineSelectionToPagePath:pagePath];
         }
         return;
+    }
+    // Entering search: widen the sidebar once so result paths stay readable.
+    if (!_searchWidened) {
+        _searchWidened = YES;
+        _preSearchWidth = _splitView.arrangedSubviews.firstObject.frame.size.width;
+        [_splitView setPosition:420 ofDividerAtIndex:0];
     }
     NSMutableArray<CHMTopicNode *> *hits = [NSMutableArray array];
     NSMutableArray<CHMTopicNode *> *stack =
