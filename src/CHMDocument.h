@@ -24,6 +24,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSURL *)homeURL;
 /// Raw bytes for an archive-relative path (nil if absent).
 - (nullable NSData *)rawDataForCHMPath:(NSString *)path;
+/// TOC node whose path equals the given archive-relative path (case-insensitive).
+- (nullable CHMTopicNode *)nodeForPath:(NSString *)path;
 
 @end
 

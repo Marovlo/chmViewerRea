@@ -13,6 +13,7 @@ static NSString * const kToolbarID = @"CHMReMainToolbar";
 @property (nonatomic, strong) NSSearchField *searchField;
 @property (nonatomic, strong) NSOutlineView *outlineView;
 @property (nonatomic, copy) NSArray<CHMTopicNode *> *searchResults;
+@property (nonatomic, assign) BOOL syncingSelection;
 @property (nonatomic, strong) WKWebView *webView;
 @property (nonatomic, strong) ItssSchemeHandler *schemeHandler;
 @property (nonatomic, strong) NSURL *currentURL;
@@ -166,6 +167,7 @@ static NSArray<NSArray *> *EncodingMenu() {
               NSStringFromRect(leftPane.frame),
               NSStringFromRect(leftScroll.frame),
               NSStringFromRect(_webView.frame));
+        if (getenv("CHMRE_TEST")) [self runSmokeTest];
     });
     return self;
 }
@@ -264,6 +266,25 @@ static NSArray<NSArray *> *EncodingMenu() {
 
 #pragma mark Search
 
+// CHMRE_TEST=1: programmatic verification of search + selection sync.
+- (void)runSmokeTest {
+    _searchField.stringValue = @"YANG";
+    [self searchChanged:_searchField];
+    NSLog(@"[CHMRe] TEST search hits=%lu", (unsigned long)_searchResults.count);
+    for (NSInteger i = 0; i < MIN(2, (NSInteger)_searchResults.count); i++) {
+        CHMTopicNode *n = _searchResults[i];
+        NSLog(@"[CHMRe] TEST hit%ld: '%@' path='%@'", (long)i, n.title, n.path);
+    }
+
+    _searchField.stringValue = @"";
+    [self searchChanged:_searchField];
+    [self syncOutlineSelectionToPagePath:@"huawei-aaa.html"];
+    NSInteger row = _outlineView.selectedRow;
+    CHMTopicNode *sel = [_outlineView itemAtRow:row];
+    NSLog(@"[CHMRe] TEST sync row=%ld title='%@' path='%@'",
+          (long)row, sel.title, sel.path ?: @"-");
+}
+
 - (BOOL)isSearching {
     return _searchField.stringValue.length > 0;
 }
@@ -272,6 +293,7 @@ static NSArray<NSArray *> *EncodingMenu() {
     NSString *q = sender.stringValue;
     if (q.length == 0) {
         _searchResults = nil;
+        _outlineView.rowHeight = 22;
         [_outlineView reloadData];
         for (CHMTopicNode *top in self.chmDoc.tocRoot.children)
             [_outlineView expandItem:top];
@@ -290,6 +312,7 @@ static NSArray<NSArray *> *EncodingMenu() {
         [stack addObjectsFromArray:n.children];
     }
     _searchResults = hits;
+    _outlineView.rowHeight = 34;   // two-line result cells
     [_outlineView reloadData];
     [_outlineView sizeLastColumnToFit];
     NSLog(@"[CHMRe] search '%@': %lu hits", q, (unsigned long)hits.count);
@@ -321,19 +344,91 @@ static NSArray<NSArray *> *EncodingMenu() {
     return ((CHMTopicNode *)item).title;
 }
 
+// Search mode: two-line cell (title + gray path). Tree mode: AppKit default cell.
+- (nullable NSView *)outlineView:(NSOutlineView *)outlineView
+              viewForTableColumn:(nullable NSTableColumn *)tableColumn
+                            item:(id)item {
+    if (!self.isSearching) return nil;
+
+    CHMTopicNode *node = item;
+    NSTableCellView *cell = [outlineView makeViewWithIdentifier:@"resultCell" owner:self];
+    if (!cell) {
+        cell = [[NSTableCellView alloc] initWithFrame:NSZeroRect];
+        cell.identifier = @"resultCell";
+
+        NSTextField *title = [NSTextField labelWithString:@""];
+        title.translatesAutoresizingMaskIntoConstraints = NO;
+        title.lineBreakMode = NSLineBreakByTruncatingTail;
+        title.identifier = @"title";
+        [cell addSubview:title];
+        cell.textField = title;
+
+        NSTextField *detail = [NSTextField labelWithString:@""];
+        detail.translatesAutoresizingMaskIntoConstraints = NO;
+        detail.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        detail.font = [NSFont systemFontOfSize:10];
+        detail.textColor = [NSColor secondaryLabelColor];
+        detail.identifier = @"detail";
+        [cell addSubview:detail];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [title.leadingAnchor constraintEqualToAnchor:cell.leadingAnchor constant:2],
+            [title.trailingAnchor constraintLessThanOrEqualToAnchor:cell.trailingAnchor constant:-2],
+            [title.topAnchor constraintEqualToAnchor:cell.topAnchor constant:2],
+            [detail.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
+            [detail.trailingAnchor constraintLessThanOrEqualToAnchor:cell.trailingAnchor constant:-2],
+            [detail.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:1],
+        ]];
+    }
+    cell.textField.stringValue = node.title;
+    for (NSView *sv in cell.subviews) {
+        if ([sv isKindOfClass:[NSTextField class]] &&
+            [sv.identifier isEqualToString:@"detail"]) {
+            ((NSTextField *)sv).stringValue = node.path ?: @"";
+            break;
+        }
+    }
+    return cell;
+}
+
 - (void)outlineViewSelectionDidChange:(NSNotification *)notification {
+    if (_syncingSelection) return;
     CHMTopicNode *node = [_outlineView itemAtRow:_outlineView.selectedRow];
     if (node.path.length) [self navigateTo:[self.chmDoc URLForCHMPath:node.path]];
 }
 
 #pragma mark WKNavigationDelegate
 
+// Right -> left sync: highlight the TOC entry matching the page just loaded.
+- (void)syncOutlineSelectionToPagePath:(NSString *)pagePath {
+    if (self.isSearching || pagePath.length == 0) return;
+    CHMTopicNode *node = [self.chmDoc nodeForPath:pagePath];
+    if (!node) return;
+
+    // expand ancestors so the row is visible
+    NSMutableArray<CHMTopicNode *> *chain = [NSMutableArray array];
+    for (CHMTopicNode *p = node.parent; p && p.parent; p = p.parent)
+        [chain insertObject:p atIndex:0];
+    for (CHMTopicNode *a in chain) [_outlineView expandItem:a];
+
+    NSInteger row = [_outlineView rowForItem:node];
+    if (row < 0) return;
+    _syncingSelection = YES;
+    [_outlineView selectRowIndexes:[NSIndexSet indexSetWithIndex:row]
+                 byExtendingSelection:NO];
+    [_outlineView scrollRowToVisible:row];
+    _syncingSelection = NO;
+}
+
 - (void)webView:(WKWebView *)webView didFinishNavigation:(null_unspecified WKNavigation *)navigation {
     NSLog(@"[CHMRe] page loaded: %@", _currentURL);
-    [webView evaluateJavaScript:@"JSON.stringify({t: document.title, len: (document.body.innerText||'').length, imgs: document.images.length})"
-              completionHandler:^(id res, NSError *err) {
-        NSLog(@"[CHMRe] DOM: %@ (err=%@)", res, err);
-    }];
+    // Derive the archive-relative path of the loaded page (host "chm").
+    NSString *pagePath = webView.URL.path;                       // "/toctopics/x.html"
+    if (pagePath.length > 1) {
+        pagePath = [pagePath substringFromIndex:1];
+        pagePath = [pagePath stringByRemovingPercentEncoding] ?: pagePath;
+        [self syncOutlineSelectionToPagePath:pagePath];
+    }
 }
 
 - (void)webView:(WKWebView *)webView

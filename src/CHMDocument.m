@@ -52,6 +52,20 @@
     return [self.chmHandle dataForPath:path];
 }
 
+- (nullable CHMTopicNode *)nodeForPath:(NSString *)path {
+    if (path.length == 0) return nil;
+    NSMutableArray<CHMTopicNode *> *stack = [self.tocRoot.children mutableCopy];
+    while (stack.count) {
+        CHMTopicNode *n = stack.lastObject;
+        [stack removeLastObject];
+        if (n.path.length &&
+            [n.path compare:path options:NSCaseInsensitiveSearch] == NSOrderedSame)
+            return n;
+        [stack addObjectsFromArray:n.children];
+    }
+    return nil;
+}
+
 - (NSURL *)URLForCHMPath:(NSString *)path {
     NSString *escaped = [path stringByAddingPercentEncodingWithAllowedCharacters:
         [NSCharacterSet URLPathAllowedCharacterSet]];
