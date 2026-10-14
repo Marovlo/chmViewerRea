@@ -283,6 +283,9 @@ static NSArray<NSArray *> *EncodingMenu() {
     CHMTopicNode *sel = [_outlineView itemAtRow:row];
     NSLog(@"[CHMRe] TEST sync row=%ld title='%@' path='%@'",
           (long)row, sel.title, sel.path ?: @"-");
+    // verify the row actually renders its text (regression: empty cells)
+    NSTableCellView *cv = [_outlineView viewAtColumn:0 row:row makeIfNecessary:YES];
+    NSLog(@"[CHMRe] TEST cell text='%@'", cv.textField.stringValue ?: @"<nil view>");
 }
 
 - (BOOL)isSearching {
@@ -344,13 +347,32 @@ static NSArray<NSArray *> *EncodingMenu() {
     return ((CHMTopicNode *)item).title;
 }
 
-// Search mode: two-line cell (title + gray path). Tree mode: AppKit default cell.
+// Search mode: two-line cell (title + gray path). Tree mode: single-line cell.
 - (nullable NSView *)outlineView:(NSOutlineView *)outlineView
               viewForTableColumn:(nullable NSTableColumn *)tableColumn
                             item:(id)item {
-    if (!self.isSearching) return nil;
-
     CHMTopicNode *node = item;
+
+    if (!self.isSearching) {
+        NSTableCellView *cell = [outlineView makeViewWithIdentifier:@"treeCell" owner:self];
+        if (!cell) {
+            cell = [[NSTableCellView alloc] initWithFrame:NSZeroRect];
+            cell.identifier = @"treeCell";
+            NSTextField *title = [NSTextField labelWithString:@""];
+            title.translatesAutoresizingMaskIntoConstraints = NO;
+            title.lineBreakMode = NSLineBreakByTruncatingTail;
+            [cell addSubview:title];
+            cell.textField = title;
+            [NSLayoutConstraint activateConstraints:@[
+                [title.leadingAnchor constraintEqualToAnchor:cell.leadingAnchor constant:2],
+                [title.trailingAnchor constraintLessThanOrEqualToAnchor:cell.trailingAnchor constant:-2],
+                [title.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
+            ]];
+        }
+        cell.textField.stringValue = node.title;
+        return cell;
+    }
+
     NSTableCellView *cell = [outlineView makeViewWithIdentifier:@"resultCell" owner:self];
     if (!cell) {
         cell = [[NSTableCellView alloc] initWithFrame:NSZeroRect];
