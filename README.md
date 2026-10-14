@@ -1,67 +1,52 @@
-# ChmViewerRe — CHM Viewer 重建版
+# CHM Viewer RE
 
-基于对 macOS App Store 应用 **CHM Viewer Star 6.3.7**（`com.Ababe.chmviewer5`）的
-逆向分析（REA + Ghidra），以全新代码重建的 CHM 阅读器核心 + UI。
-不含原应用的任何二进制代码或资源；解析层使用开源 CHMLIB（LGPL，即原应用内嵌的同源库）。
+原生 macOS CHM 阅读器。基于对某商业 CHM 阅读器的逆向架构重建：CHMLIB（LGPL，修复版）+
+WKWebView + AppKit，全部本地运行，无网络依赖。
 
-## 与原版对齐的架构
+## 功能
 
-```
-CHM 文件 → chmlib 解析 (ITSF/ITSP + LZX) → itss:// 自定义协议 → WKWebView 渲染
-                    ↓
-          ABCHMContent 解析 .hhc/.hhk → TOC 大纲 / 索引
-```
+- **CHM 解析**：ITSF/ITSP 容器 + LZX 解压（块缓存），兼容 hhc / chmcmd 等工具生成的大档案
+- **目录树**：解析 .hhc/.hhk，展开/折叠/点选跳转，行高与对齐已调校
+- **目录搜索**：侧栏顶部实时过滤，结果平铺并显示章节路径；单击预览，双击退出搜索并定位
+- **双向联动**：点目录跳正文；正文内翻页/跳转时目录选中项自动跟随
+- **编码**：自动探测 UTF-8 / GBK（中文 CHM 免设置），工具栏可手动切换
+- **侧栏**：宽度可拖拽、可折叠（⌘⌥S），进入搜索自动加宽
 
-对逆向结论逐条对齐：
-- 原版嵌入式 chmlib（校验 ITSF/ITSP 魔数、0x4d8 句柄、块缓存 LZX）→ 本项目 vendor/chmlib
-- `itss://chm/%@` 自定义协议（composeURL:）→ ItssSchemeHandler（WKURLSchemeHandler）
-- `ABCHMContent initWithData:encodingName:`（libxml2 解析 hhc/hhk）→ 同名类，同依赖
-- NSDocument 式文档模型 / `readFromFile:` 打开即 loadMetadata + setupTOCSource → CHMDocument
-- 左侧 TOC 大纲 + 右侧 WebView + 右上角文本编码下拉 → CHMWindowController
-- 侧栏顶部目录搜索框（实时过滤 9000+ 节点，平铺结果列表）
-- 原版 chmlib 的 UTF-16 目录名 / PMGI collation 两处缺陷已修复（见下）
+## 下载安装
 
-## 对原版 chmlib 的三处必要修复（逆向发现）
+从 [Releases](https://github.com/Marovlo/chmViewerRea/releases) 下载 zip 解压得到 `ChmViewerRe.app`。
 
-1. **UTF-16LE 目录名**：上游把条目名按字节拷贝，中文/长名乱码 → 补 UTF-16→UTF-8 转换
-2. **PMGI 索引误定向**：上游用 strcasecmp（ASCII 序）走索引，但 CHM 实际 collation
-   不同，大档案（>1 块）会 resolve 失败 → PMGI 失败后回退 PMGL 链线性扫描
-3. **GBK 标题**：hhc 常为 GBK 编码 → UTF-8 探测失败回退 GB18030
-
-页面文本编码支持 UTF-8 自动探测 + GB18030 回退，工具栏可手动切换（同原版"右上角编码"）。
+> 应用为 **ad-hoc 签名（未公证）**，首次打开会被 Gatekeeper 拦截，任选其一解除：
+>
+> ```bash
+> # 方法一：移除隔离属性（推荐）
+> xattr -cr /path/to/ChmViewerRe.app
+> ```
+>
+> 方法二：双击打开 → 系统设置 → 隐私与安全性 → 点击"仍要打开"。
 
 ## 构建
 
-```bash
-make          # 产出 build/ChmViewerRe.app 和 CLI 验证工具 build/chmtest
-open build/ChmViewerRe.app 你的文件.chm
-```
-
-CLI 冒烟测试：
+需要 Xcode Command Line Tools（clang / libxml2 SDK headers）。
 
 ```bash
-./build/chmtest 文件.chm                      # 枚举 + TOC 树 + 首页内容
-./build/chmtest 文件.chm 内部/路径.html [偏移 长度]  # 按路径取内容
-python3 tools/make_test_chm.py build/test.chm  # 生成无压缩测试 CHM
+make                                # 产出 build/ChmViewerRe.app + CLI 工具 chmtest
+open build/ChmViewerRe.app 文件.chm  # 使用
 ```
 
-## 已验证
+## 验证与测试
 
-- UBM 2.0.RC2 二次开发指南（9240 条目、1.87MB hhc、LZX 多块、GBK 中文）：
-  目录树/正文/页面内跳转/资源加载全部正常
-- chmcmd（Free Pascal）生成的 LZX 压缩 CHM：解析与解压正常
-- 自造无压缩 CHM：全链路 PASS
+```bash
+./build/chmtest 文件.chm                        # 枚举 + TOC 树 + 内容读取冒烟测试
+python3 tools/make_test_chm.py build/test.chm   # 生成无压缩测试 CHM
+CHMRE_TEST=1 启动应用                            # 程序化验证搜索与目录联动
+```
 
-## 已知差异（vs 原版 6.3.7）
+## 结构
 
-- 无多标签（原版用开源 PSMTabBarControl）、无书签/搜索/打印、无 #SYSTEM 标题解析
-- 无内购/试用/VIP 逻辑（刻意未重建）
-- DotZLib.chm（grpc third_party 内）文件本身截断 2 字节（72726 vs ITSF 声明 72728），
-  最后一个 LZX 块无法解压属文件损坏，非阅读器问题
-
-## 目录
-
-- `src/` 应用源码（ObjC/AppKit，~1000 行）
-- `vendor/chmlib/` CHMLIB 0.40（LGPL）+ 修复补丁
-- `tools/` chmtest.m（CLI 验证）、make_test_chm.py（测试 CHM 生成器）
-- `resources/Info.plist`
+```
+src/             应用源码（ObjC/AppKit）
+vendor/chmlib/   CHMLIB 0.40（LGPL）+ UTF-16 目录名、PMGI collation 两处修复
+tools/           chmtest、测试 CHM 生成器、图标生成器
+.github/         tag 推送自动构建并发布 Release
+```

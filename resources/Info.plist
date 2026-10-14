@@ -5,8 +5,8 @@
     <key>CFBundleName</key>                     <string>CHM Viewer RE</string>
     <key>CFBundleDisplayName</key>              <string>CHM Viewer RE</string>
     <key>CFBundleIdentifier</key>               <string>local.re.chmviewer</string>
-    <key>CFBundleVersion</key>                  <string>1.0</string>
-    <key>CFBundleShortVersionString</key>       <string>1.0</string>
+    <key>CFBundleVersion</key>                  <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>       <string>1.0.0</string>
     <key>CFBundlePackageType</key>              <string>APPL</string>
     <key>CFBundleExecutable</key>               <string>ChmViewerRe</string>
     <key>NSPrincipalClass</key>                 <string>NSApplication</string>

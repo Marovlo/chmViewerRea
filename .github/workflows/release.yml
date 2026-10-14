@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app and CLI
+        run: make
+
+      - name: Smoke test
+        run: |
+          python3 tools/make_test_chm.py build/test.chm
+          set -o pipefail
+          ./build/chmtest build/test.chm | tee /tmp/smoke.log
+          grep -q '^PASS' /tmp/smoke.log
+
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/ChmViewerRe.app "ChmViewerRe-${VERSION}-macos-arm64.zip"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "ChmViewerRe-${VERSION}-macos-arm64.zip" \
+            --title "ChmViewerRe ${VERSION}" \
+            --notes "macOS (Apple Silicon) CHM 阅读器。
+
+          **安装**：下载 zip 解压后，若 Gatekeeper 拦截（应用未公证），执行：
+          \`\`\`
+          xattr -cr /path/to/ChmViewerRe.app
+          \`\`\`
+          或在 系统设置 → 隐私与安全性 中点击『仍要打开』。
+
+          功能：目录树/搜索/正文双向联动、LZX 解压、GBK 自动编码探测。"
