@@ -15,6 +15,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable CHMTopicNode *)firstNodeWithPath;
 /// Depth-first flattened list of nodes that have a path.
 - (NSArray<CHMTopicNode *> *)navigableNodes;
+/// Ancestor titles joined with " › " (excluding the synthetic root), e.g.
+/// "配置指南 › 基础配置 › 配置用户登录提示信息".
+- (NSString *)breadcrumb;
 
 @end
 

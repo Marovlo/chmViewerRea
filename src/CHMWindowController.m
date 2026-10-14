@@ -273,7 +273,7 @@ static NSArray<NSArray *> *EncodingMenu() {
     NSLog(@"[CHMRe] TEST search hits=%lu", (unsigned long)_searchResults.count);
     for (NSInteger i = 0; i < MIN(2, (NSInteger)_searchResults.count); i++) {
         CHMTopicNode *n = _searchResults[i];
-        NSLog(@"[CHMRe] TEST hit%ld: '%@' path='%@'", (long)i, n.title, n.path);
+        NSLog(@"[CHMRe] TEST hit%ld: '%@' breadcrumb='%@'", (long)i, n.title, n.breadcrumb);
     }
 
     _searchField.stringValue = @"";
@@ -301,6 +301,13 @@ static NSArray<NSArray *> *EncodingMenu() {
         for (CHMTopicNode *top in self.chmDoc.tocRoot.children)
             [_outlineView expandItem:top];
         [_outlineView sizeLastColumnToFit];
+        // Back from search: the tree follows whatever page the right side shows.
+        NSString *pagePath = _webView.URL.path;
+        if (pagePath.length > 1) {
+            pagePath = [pagePath substringFromIndex:1];
+            pagePath = [pagePath stringByRemovingPercentEncoding] ?: pagePath;
+            [self syncOutlineSelectionToPagePath:pagePath];
+        }
         return;
     }
     NSMutableArray<CHMTopicNode *> *hits = [NSMutableArray array];
@@ -406,7 +413,7 @@ static NSArray<NSArray *> *EncodingMenu() {
     for (NSView *sv in cell.subviews) {
         if ([sv isKindOfClass:[NSTextField class]] &&
             [sv.identifier isEqualToString:@"detail"]) {
-            ((NSTextField *)sv).stringValue = node.path ?: @"";
+            ((NSTextField *)sv).stringValue = node.breadcrumb;   // chapter path
             break;
         }
     }

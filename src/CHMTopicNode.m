@@ -40,4 +40,11 @@
     return out;
 }
 
+- (NSString *)breadcrumb {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (CHMTopicNode *n = self; n.parent != nil; n = n.parent)
+        [parts insertObject:n.title atIndex:0];
+    return [parts componentsJoinedByString:@" › "];
+}
+
 @end
